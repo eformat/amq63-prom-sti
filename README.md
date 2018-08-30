@@ -11,11 +11,11 @@ Sti just bundles in the jar and prometheus yml config, in `configuration/promcon
 ## To Build
 
 ```
-oc new-project mydemo
+oc new-project amq63
 oc import-image jboss-amq-63 --from=registry.access.redhat.com/jboss-amq-6/amq63-openshift --confirm -n openshift
-oc new-build registry.access.redhat.com/jboss-amq-6/amq63-openshift:latest~https://github.com/welshstew/amq63-prom-sti.git
+oc new-build registry.access.redhat.com/jboss-amq-6/amq63-openshift:latest~https://github.com/eformat/amq63-prom-sti.git
 oc create -f amq63-basic-prom.json
-oc new-app --template=amq63-basic-prom -p MQ_QUEUES=hello1 -p IMAGE_STREAM_NAMESPACE=mydemo
+oc new-app --template=amq63-basic-prom -p MQ_QUEUES=hello1 -p IMAGE_STREAM_NAMESPACE=amq63
 ```
 
 ## Template Additions
@@ -116,8 +116,14 @@ scrape_configs:
     - source_labels: [__meta_kubernetes_pod_container_port_name]
       action: keep
       regex: prometheus
+
 ```
 
+Annotate the service for scraping:
+
+```
+oc annotate svc broker-amq-prom --overwrite prometheus.io/path='/prometheus' prometheus.io/port='80' prometheus.io/scrape='true'
+```
 
 ## Setting up Prometheus and Grafana
 
