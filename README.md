@@ -8,7 +8,7 @@ Sti just bundles in the jar and prometheus yml config, in `configuration/promcon
 
 `ACTIVEMQ_OPTS=/opt/amq/lib/jmx_prometheus_javaagent-0.10.jar=9779:/opt/amq/conf/promconfig.yml`
 
-## To Build
+## To Build - Basic
 
 ```
 oc new-project amq63
@@ -16,6 +16,32 @@ oc import-image jboss-amq-63 --from=registry.access.redhat.com/jboss-amq-6/amq63
 oc new-build registry.access.redhat.com/jboss-amq-6/amq63-openshift:latest~https://github.com/eformat/amq63-prom-sti.git
 oc create -f amq63-basic-prom.json
 oc new-app --template=amq63-basic-prom -p MQ_QUEUES=hello1 -p IMAGE_STREAM_NAMESPACE=amq63
+```
+
+## To Build - Advanced
+
+- SSL, 3 broker cluster, split-n persistent storage
+
+```bash
+oc new-project amq63
+oc import-image jboss-amq-63 --from=registry.access.redhat.com/jboss-amq-6/amq63-openshift --confirm -n openshift
+oc new-build registry.access.redhat.com/jboss-amq-6/amq63-openshift:latest~https://github.com/eformat/amq63-prom-sti.git
+echo '{"kind": "ServiceAccount", "apiVersion": "v1", "metadata": {"name": "amq-service-account"}}' | oc create -f -
+oc policy add-role-to-user view system:serviceaccount:$(oc project -q):amq-service-account
+alias keytool=/usr/java/jdk1.8.0_152/bin/keytool
+keytool -genkey -noprompt -trustcacerts -alias broker -keyalg RSA -keystore broker.ks -keypass password -storepass password -dname "cn=Example, ou=Foo, o=ACME, c=AU"
+keytool -export -noprompt -alias broker -keystore broker.ks -file broker_cert -storepass password
+keytool -genkey -noprompt -trustcacerts -alias client -keyalg RSA -keystore client.ks -keypass password -storepass password -dname "cn=Example, ou=Foo, o=ACME, c=AU"
+keytool -import -noprompt -trustcacerts -alias broker -keystore client.ts -file broker_cert -storepass password
+oc secrets new amq-app-secret broker.ks
+oc secrets add sa/amq-service-account secret/amq-app-secret
+oc create -f amq63-persistent-ssl-prom.json
+oc new-app amq63-persistent-ssl-prom -p AMQ_SPLIT=true -p MQ_USERNAME=admin -p MQ_PASSWORD=admin -p AMQ_STORAGE_USAGE_LIMIT=1gb -p IMAGE_STREAM_NAMESPACE=$(oc project -q) -p AMQ_TRUSTSTORE_PASSWORD=password -p AMQ_KEYSTORE_PASSWORD=password -p AMQ_SECRET=amq-app-secret -p AMQ_KEYSTORE=broker.ks -p AMQ_TRUSTSTORE=broker.ks
+oc create route passthrough --service broker-amq-tcp-ssl
+oc create route passthrough --service broker-amq-stomp-ssl
+oc create route passthrough --service broker-amq-amqp-ssl
+oc create route passthrough --service broker-amq-mqtt-ssl
+oc scale dc/broker-amq --replicas=3
 ```
 
 ## Template Additions
@@ -68,12 +94,13 @@ This is the prometheus configuration just to pull out the QueueSize
 
 ```
 rules:
-  - pattern: 'org.apache.activemq<type=(\w+), brokerName=(.*?), destinationType=(\w+), destinationName=(.*?)><>QueueSize'
-    name: queue_size
-    help: Queue Size
-    type: GAUGE
-    labels:
-      destination: $4
+- pattern: 'org.apache.activemq<type=Broker, brokerName=([^,]+), destinationType=Queue, destinationName=([^,]+)><>QueueSize'
+  name: activemq_queue_size
+  help: Number of messages on this destination
+  type: GAUGE
+  labels:
+    broker: $1
+    queue: $2
 ```
 
 
@@ -104,19 +131,22 @@ global:
 
 # Scraping could be configured for specific IPs, or using discovery mechanisms
 scrape_configs:
+# AMQ Brokers
+- job_name: 'amq-brokers'
 
-  - job_name: 'my-service-endpoints'
-    kubernetes_sd_configs:
-    - role: endpoints
+  tls_config:
+    ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+    # TODO: this should be per target
+    insecure_skip_verify: true
+  bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
 
-    relabel_configs:
-    - source_labels: [__meta_kubernetes_service_name]
-      action: keep
-      regex: broker-amq-prom
-    - source_labels: [__meta_kubernetes_pod_container_port_name]
-      action: keep
-      regex: prometheus
+  kubernetes_sd_configs:
+  - role: endpoints
 
+  relabel_configs:
+  - source_labels: [__meta_kubernetes_service_name, __meta_kubernetes_pod_container_port_name]
+    action: keep
+    regex: broker-amq-prom;prometheus
 ```
 
 Annotate the service for scraping:
