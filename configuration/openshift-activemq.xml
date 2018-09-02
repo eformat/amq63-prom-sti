@@ -35,7 +35,7 @@
     <!--
         The <broker> element is used to configure the ActiveMQ broker.
     -->
-    <broker xmlns="http://activemq.apache.org/schema/core" brokerName="${HOSTNAME}" dataDirectory="${activemq.data}">
+    <broker xmlns="http://activemq.apache.org/schema/core" brokerName="${HOSTNAME}" dataDirectory="${activemq.data}" cacheTempDestinations="true" timeBeforePurgeTempDestinations="20000" allowTempAutoCreationOnSend="true">
 
         <!-- ##### DESTINATIONS ##### -->
 
@@ -104,7 +104,7 @@
                 (i.e. messageTTL="-1") but create demand subscription only to the next connected
                 broker (i.e. consumerTTL="1"). See AMQ-4607.
             -->
-            <networkConnector userName="admin" password="admin" uri="dns://broker-amq-mesh:61616/?transportType=tcp&amp;queryInterval=30" messageTTL="-1" consumerTTL="1" />
+            <networkConnector userName="admin" password="admin" uri="dns://broker-amq-mesh:61616/?transportType=tcp&amp;queryInterval=30" messageTTL="-1" consumerTTL="1" useVirtualDestSubs="true" />
         </networkConnectors>
 
         <!--
